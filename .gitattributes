@@ -1,0 +1,6 @@
+# 补丁必须逐字节保存：内容行里带 CRLF 上下文，任何 EOL 归一化都会让 CI 的
+# `git apply` 失败。因此显式关闭该类型文件的文本转换。
+*.patch -text
+
+# 批处理脚本必须是 CRLF（cmd.exe 对 LF 的解析会丢标签、吞行首字符）。
+*.cmd text eol=crlf

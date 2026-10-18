@@ -1,5 +1,5 @@
 diff --git a/build/VisualStudio/Notepad4.vcxproj b/build/VisualStudio/Notepad4.vcxproj
-index b4c3b2e..c8957a9 100644
+index b4c3b2e..6fd57b7 100644
 --- a/build/VisualStudio/Notepad4.vcxproj
 +++ b/build/VisualStudio/Notepad4.vcxproj
 @@ -157,7 +157,7 @@
@@ -24,15 +24,25 @@ index b4c3b2e..c8957a9 100644
      </Link>
    </ItemDefinitionGroup>
    <ItemDefinitionGroup Condition="$(Configuration.EndsWith('Debug'))">
-@@ -594,6 +595,17 @@
+@@ -594,6 +595,27 @@
      <ClCompile Include="..\..\src\Helpers.cpp" />
      <ClCompile Include="..\..\src\Notepad4.cpp" />
      <ClCompile Include="..\..\src\Styles.cpp" />
-+    <ClCompile Include="..\..\src\MarkdownPreview.cpp" />
-+    <ClCompile Include="..\..\src\MarkdownPreviewView.cpp" />
-+    <ClCompile Include="..\..\..\shared\text_encoding.cpp" />
-+    <ClCompile Include="..\..\..\preview\src\MarkdownRenderer.cpp" />
-+    <ClCompile Include="..\..\..\preview\src\LocalContent.cpp" />
++    <ClCompile Include="..\..\src\MarkdownPreview.cpp">
++      <AdditionalOptions>/execution-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\src\MarkdownPreviewView.cpp">
++      <AdditionalOptions>/execution-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\..\shared\text_encoding.cpp">
++      <AdditionalOptions>/execution-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\..\preview\src\MarkdownRenderer.cpp">
++      <AdditionalOptions>/execution-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <ClCompile Include="..\..\..\preview\src\LocalContent.cpp">
++      <AdditionalOptions>/execution-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
 +    <ClCompile Include="..\..\..\third_party\md4c\md4c.c">
 +    </ClCompile>
 +    <ClCompile Include="..\..\..\third_party\md4c\md4c-html.c">
@@ -42,7 +52,7 @@ index b4c3b2e..c8957a9 100644
      <ClCompile Include="..\..\src\EditLexers\stlABAQUS.cpp" />
      <ClCompile Include="..\..\src\EditLexers\stlActionScript.cpp" />
      <ClCompile Include="..\..\src\EditLexers\stlAPDL.cpp" />
-@@ -781,7 +793,9 @@
+@@ -781,7 +803,9 @@
      <Manifest Include="..\..\res\Notepad4.exe.manifest" />
    </ItemGroup>
    <ItemGroup>

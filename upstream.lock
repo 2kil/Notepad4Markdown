@@ -1,0 +1,9 @@
+# Upstream source that patch/0001-notepad4-markdown-preview.patch applies to.
+#
+# scripts/fetch_upstream.py and the GitHub Actions workflow read this file.
+# Keep commit pinned: the patch is generated against exactly this revision.
+# When moving to a newer upstream, update commit/date and regenerate the patch.
+
+repo=https://github.com/zufuliu/notepad4.git
+commit=bc6c799223dadbaeabfc9f8125a6545cb162d64b
+date=2026-10-18

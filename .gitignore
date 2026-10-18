@@ -1,0 +1,13 @@
+# 由 scripts/fetch_upstream.py 生成：CI 与本机构建时按 upstream.lock 拉取
+/notepad4/
+/upstream-notepad4/
+
+# 构建输出与中间产物
+/build/
+/dist/
+*.user
+*.suo
+.vs/
+
+# 助手/编辑器本地状态（不属于源码）
+.workbuddy/

@@ -1,0 +1,86 @@
+name: build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x64:
+    name: Windows x64
+    runs-on: windows-latest
+    env:
+      CONFIGURATION: Release
+      PLATFORM: x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch pinned upstream and apply patch
+        run: python scripts/fetch_upstream.py
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Notepad4.exe
+        run: >
+          msbuild notepad4\build\VisualStudio\Notepad4.sln /t:Notepad4 /m
+          /p:Configuration=${{ env.CONFIGURATION }}
+          /p:Platform=${{ env.PLATFORM }}
+          /v:minimal
+
+      - name: Build unit tests
+        run: >
+          msbuild tests\mdtest.vcxproj /m
+          /p:Configuration=${{ env.CONFIGURATION }}
+          /p:Platform=${{ env.PLATFORM }}
+          /v:minimal
+
+      - name: Run unit tests
+        run: build\out\x64\mdtest.exe
+
+      - name: Package
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $version = $env:GITHUB_REF_NAME
+          } else {
+            $version = "dev-" + $env:GITHUB_SHA.Substring(0, 7)
+          }
+          ./scripts/package.ps1 -Version $version
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Notepad4Markdown-${{ github.sha }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: Publish to GitHub Releases
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $assets = Get-ChildItem dist\*.zip, dist\*.sha256 | ForEach-Object { $_.FullName }
+
+          gh release view $tag --json tagName -q .tagName 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $tag --generate-notes $assets
+          } else {
+            gh release upload $tag $assets --clobber
+          }
+          if ($LASTEXITCODE -ne 0) { throw "gh release failed with exit code $LASTEXITCODE" }

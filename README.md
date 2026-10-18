@@ -1,5 +1,8 @@
 # Notepad4 Markdown 实时预览
 
+[![build](https://github.com/2kil/Notepad4Markdown/actions/workflows/build.yml/badge.svg)](https://github.com/2kil/Notepad4Markdown/actions/workflows/build.yml)
+[![release](https://img.shields.io/github/v/release/2kil/Notepad4Markdown?include_prereleases&sort=semver)](https://github.com/2kil/Notepad4Markdown/releases)
+
 为 [Notepad4](https://github.com/zufuliu/notepad4) 增加 Markdown 实时预览：编辑 `.md` 文件时，
 按 `Ctrl+Alt+M` 在**同一个窗口内**把编辑器分成左右两栏，右侧显示渲染结果；左侧再怎么改，右侧都会在 250 ms 防抖后跟上，不需要先保存。
 
@@ -12,7 +15,7 @@
 
 | 问题 | 结论 |
 | --- | --- |
-| 1. 真正的 DLL 插件，还是需要主程序补丁？ | **需要主程序补丁**。Notepad4 没有 DLL 插件机制（第 1.2 节）。预览**编译进 `Notepad4.exe`**，不再有独立进程。补丁涉及 11 个文件、`+4229 / −6` 行（其中 4 个是新增的预览模块源文件、1 个是生成的中文资源块）。 |
+| 1. 真正的 DLL 插件，还是需要主程序补丁？ | **需要主程序补丁**。Notepad4 没有 DLL 插件机制（第 1.2 节）。预览**编译进 `Notepad4.exe`**，不再有独立进程。补丁涉及 11 个文件、`+4271 / −7` 行（其中 4 个是新增的预览模块源文件、1 个是生成的中文资源块）。 |
 | 2. 能否预览未保存的编辑内容？ | **能**。内容取自 Scintilla 内存缓冲区（`SCI_GETTEXT`），不读磁盘；集成测试实测「键入 → 页面回报渲染完成」。 |
 | 3. 是否支持自动刷新？ | **支持**，默认开启，防抖 250 ms（可配置）；菜单可关闭，关闭后不再安排任何渲染任务。 |
 | 4. 图片能显示吗？ | **本地和网络都能显示**：相对路径图片（同目录 / 子目录 / `./` 前缀）、`http(s)://` 远程图片、`data:image/*` 内嵌图片都正常渲染。本地图片仅允许读取**当前文档目录及其子目录**；`javascript:`、`file:` 绝对路径、`../` 越界一律拒绝。详见第 9 节。 |
@@ -141,7 +144,10 @@ Notepad4 全局用 `/Gv`（`__vectorcall` 缺省），而 CRT 的 `qsort` 回调
 
 ```
 Notepad4Markdown/
-├── notepad4/                       可修改的 Notepad4 工作副本（补丁已应用）
+├── .github/workflows/build.yml    CI：构建 → 单测 → 打包 → 发 Release
+├── upstream.lock                  上游仓库与锁定提交（patch 的基线）
+├── patch/0001-…patch              最小集成补丁（相对 upstream.lock 的提交）
+├── notepad4/                      ← 生成目录，不入库：由 fetch_upstream.py 拉取并打补丁
 │   └── src/
 │       ├── MarkdownPreview.h/.cpp        集成层：布局、分隔条、防抖、后台渲染、菜单
 │       └── MarkdownPreviewView.h/.cpp    内嵌视图：容器窗口 + WebView2 + 资源路由
@@ -161,18 +167,23 @@ Notepad4Markdown/
 │   └── webview2/                         Microsoft WebView2 SDK 头文件 + x64 静态导入库
 ├── tests/
 │   ├── mdtest.cpp                        单元测试：渲染、安全、资源路由、快照
+│   ├── mdtest.vcxproj                    单测工程（CI 用 msbuild 编译）
 │   ├── integration_test.cpp              真实 Notepad4 + 内嵌面板集成测试
 │   └── fixtures/                         测试用 Markdown 与图片
 ├── scripts/
-│   ├── build.cmd                         一键构建
+│   ├── fetch_upstream.py                 按 upstream.lock 拉取上游 + git apply 补丁
+│   ├── build.cmd                         一键构建（首次运行会先拉取上游）
 │   ├── build_notepad4.cmd                只构建编辑器
 │   ├── build_locale.cmd                  （可选）生成独立的 zh-Hans 语言包 DLL
+│   ├── package.ps1                       打发布包（zip + sha256）
 │   ├── gen_locale_rc.py                  从上游 locale 脚本生成可内嵌的中文资源块
 │   ├── run_tests.cmd                     构建并运行全部测试
 │   └── dev/                              调试用的小工具（截图、窗口枚举）
-├── patch/0001-notepad4-markdown-preview.patch   最小集成补丁
-└── build/out/x64/                        构建产物
-    └── Notepad4.exe                      （预览资源与中文界面均已内嵌）
+├── LICENSE                                本仓库新增代码（MIT）
+├── LICENSE-THIRD-PARTY.md                 第三方组件许可证
+├── build/                                 构建产物（不入库）
+│   └── out/x64/Notepad4.exe               单文件，预览资源与中文界面均已内嵌
+└── dist/                                  发布包输出（不入库）
 ```
 
 ---
@@ -207,8 +218,17 @@ scripts\build.cmd
 
 依次完成：
 
+0. 若 `notepad4\` 不存在：`fetch_upstream.py` 按 `upstream.lock` 浅克隆上游提交并应用补丁
+   （等价于手动 clone + `git apply`）；
 1. `build_notepad4.cmd` → 编译 `Notepad4.exe`（预览模块与 CSS/JS 资源一并编入）；
 2. 组装 `build\out\x64\`（只有一个 exe）。
+
+只想拉取/刷新源码树：
+
+```bat
+python scripts\fetch_upstream.py
+python scripts\fetch_upstream.py --force     :: 删掉 notepad4\ 后重新拉取
+```
 
 产物：
 
@@ -257,9 +277,47 @@ git apply ..\patch\0001-notepad4-markdown-preview.patch
 * 链接：`WebView2LoaderStatic.lib`（`..\..\..\third_party\webview2\x64`）
 * 资源的增量依赖：`ResourceCompile` 的 `AdditionalInputs` 列出 4 个 `preview/res/*`
   与生成的中文资源块——否则只改 CSS/JS 时 `rc.exe` 不会重跑，exe 里仍是旧资源。
+* 字符集：上游全局只有 `/source-charset:utf-8`，执行字符集仍取系统 ACP。自有源文件
+  （`MarkdownPreview.cpp`、`MarkdownPreviewView.cpp`、`MarkdownRenderer.cpp`、
+  `LocalContent.cpp`、`text_encoding.cpp`）额外加 `/execution-charset:utf-8`，
+  保证窄字符串里的中文在英文版 CI（ACP 1252）上也不会变成 `?`。
 
 MinGW 构建（`build/mingw/notepad4.mk`）会定义 `NP2_DISABLE_MD_PREVIEW` 并排除预览源文件——
 它没有 WebView2 的 MSVC 静态库。此时编辑器行为与原生 Notepad4 完全一致，只是菜单里没有预览项。
+
+### 5.6 GitHub 自动构建与发布
+
+仓库不保存上游源码树（`notepad4/` 约 200 MB，含构建产物），只保存
+`upstream.lock` + `patch/`。CI 与本地脚本都按同一份锁定信息复现补丁树。
+
+工作流：`.github/workflows/build.yml`（`windows-latest`）
+
+| 步骤 | 命令 | 说明 |
+| --- | --- | --- |
+| 拉取上游 | `python scripts/fetch_upstream.py` | 按 `upstream.lock` 浅克隆指定提交并 `git apply` 补丁 |
+| 编译 | `msbuild notepad4\build\VisualStudio\Notepad4.sln /t:Notepad4` | `Release|x64`，与本地构建同一工程 |
+| 单测 | `msbuild tests\mdtest.vcxproj` → `build\out\x64\mdtest.exe` | 83 项渲染/安全/路由检查 |
+| 打包 | `scripts\package.ps1 -Version <tag 或 dev-sha>` | 生成 `dist\Notepad4Markdown-<version>-x64.zip` + `.sha256` |
+| 产物 | `actions/upload-artifact` | 每次 push/PR 都能下载构建结果 |
+| 发布 | `gh release create` | 仅 `v*` 标签触发 |
+
+发布流程：
+
+```bat
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+标签推送后自动创建 Release，附件为 zip 与 sha256，Release Notes 由 GitHub 生成。
+同一标签重复推送时改为覆盖附件（`gh release upload --clobber`），不会重复建 Release。
+
+注意事项：
+
+* **升级上游**：改 `upstream.lock` 的 `commit`，重新生成补丁（`git diff`），本地跑通后再提交；
+  补丁与锁定提交必须同步，否则 CI 的 `git apply` 会失败。
+* **CI 只跑单测**：`integration_test.exe` 需要真实桌面会话与 WebView2 窗口，在无头 runner 上不可靠，
+  因此不在 CI 中执行，本地用 `scripts\run_tests.cmd` 跑全量 107 项。
+* **不缓存上游源码**：每次流水线重新浅克隆（约 15 s），换取的是一致性；如需加速可自行加 `actions/cache`。
 
 ---
 
@@ -551,7 +609,7 @@ Stage 2  editor integration    24 项，失败 0 项        exit 0
 
 ## 13. 补丁说明
 
-`patch/0001-notepad4-markdown-preview.patch`（11 个文件，`+4261 / −7`）
+`patch/0001-notepad4-markdown-preview.patch`（11 个文件，`+4271 / −7`）
 
 | 文件 | 改动 |
 | --- | --- |
