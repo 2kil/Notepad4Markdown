@@ -1,0 +1,22 @@
+Active code page: 65001
+=== Building Notepad4.exe ===
+
+D:\GitSum\Notepad4Markdown\notepad4\src\MarkdownPreviewView.cpp(574,47): warning C4389: '==': 有符号/无符号不匹配 [D:\GitSum\Notepad4Markdown\notepad4\build\VisualStudio\Notepad4.vcxproj]
+  					if (code == ERROR_FILE_NOT_FOUND || code == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) {
+  					                                         ^
+  
+  MarkdownPreviewView.cpp
+  正在生成代码
+  0 of 14662 functions ( 0.0%) were compiled, the rest were copied from previous compilation.
+    0 functions were new in current compilation
+    0 functions had inline decision re-evaluated but remain unchanged
+  已完成代码的生成
+  Notepad4.vcxproj -> D:\GitSum\Notepad4Markdown\notepad4\build\bin\Release\x64\Notepad4.exe
+[OK] D:\GitSum\Notepad4Markdown\scripts\..\notepad4\build\bin\Release\x64\Notepad4.exe
+[OK] D:\GitSum\Notepad4Markdown\scripts\..\build\out\x64\Notepad4.exe
+
+============================================================
+ Build complete: D:\GitSum\Notepad4Markdown\scripts\..\build\out\x64
+   Notepad4.exe   - editor + inline preview
+                    (CSS/JS assets and zh-Hans UI are embedded)
+============================================================

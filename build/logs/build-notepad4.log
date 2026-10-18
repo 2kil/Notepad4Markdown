@@ -1,0 +1,7 @@
+Active code page: 65001
+=== Building Notepad4.exe ===
+
+  Notepad4.vcxproj -> D:\GitSum\Notepad4Markdown\notepad4\build\bin\Release\x64\Notepad4.exe
+The process cannot access the file because it is being used by another process.
+[OK] D:\GitSum\Notepad4Markdown\scripts\..\notepad4\build\bin\Release\x64\Notepad4.exe
+[OK] D:\GitSum\Notepad4Markdown\scripts\..\build\out\x64\Notepad4.exe

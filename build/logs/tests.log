@@ -1,0 +1,158 @@
+Active code page: 65001
+=== Building mdtest.exe ===
+mdtest.cpp
+MarkdownRenderer.cpp
+LocalContent.cpp
+text_encoding.cpp
+正在生成代码...
+正在编译...
+md4c.c
+D:\GitSum\Notepad4Markdown\scripts\..\third_party\md4c\md4c.c(3093): warning C4244: “=”: 从“unsigned int”转换到“unsigned char”，可能丢失数据
+D:\GitSum\Notepad4Markdown\scripts\..\third_party\md4c\md4c.c(3189): warning C4244: “=”: 从“unsigned int”转换到“unsigned char”，可能丢失数据
+D:\GitSum\Notepad4Markdown\scripts\..\third_party\md4c\md4c.c(3190): warning C4244: “=”: 从“unsigned int”转换到“unsigned char”，可能丢失数据
+D:\GitSum\Notepad4Markdown\scripts\..\third_party\md4c\md4c.c(3306): warning C4244: “=”: 从“unsigned int”转换到“unsigned char”，可能丢失数据
+D:\GitSum\Notepad4Markdown\scripts\..\third_party\md4c\md4c.c(3330): warning C4244: “=”: 从“unsigned int”转换到“unsigned char”，可能丢失数据
+md4c-html.c
+D:\GitSum\Notepad4Markdown\scripts\..\third_party\md4c\md4c-html.c(172): warning C4310: 类型强制转换截断常量值
+D:\GitSum\Notepad4Markdown\scripts\..\third_party\md4c\md4c-html.c(172): warning C4310: 类型强制转换截断常量值
+D:\GitSum\Notepad4Markdown\scripts\..\third_party\md4c\md4c-html.c(172): warning C4310: 类型强制转换截断常量值
+D:\GitSum\Notepad4Markdown\scripts\..\third_party\md4c\md4c-html.c(179): warning C4244: “=”: 从“unsigned int”转换到“unsigned char”，可能丢失数据
+D:\GitSum\Notepad4Markdown\scripts\..\third_party\md4c\md4c-html.c(558): warning C4310: 类型强制转换截断常量值
+D:\GitSum\Notepad4Markdown\scripts\..\third_party\md4c\md4c-html.c(558): warning C4310: 类型强制转换截断常量值
+D:\GitSum\Notepad4Markdown\scripts\..\third_party\md4c\md4c-html.c(558): warning C4310: 类型强制转换截断常量值
+entity.c
+正在生成代码...
+D:\GitSum\Notepad4Markdown\third_party\md4c\md4c.c(5625) : warning C4702: 无法访问的代码
+D:\GitSum\Notepad4Markdown\third_party\md4c\md4c.c(3631) : warning C4701: 使用了可能未初始化的局部变量“attr”
+=== Building integration_test.exe ===
+integration_test.cpp
+
+=== Stage 1: unit tests ===
+Notepad4 Markdown Preview - 自动化测试
+
+[Markdown 渲染]
+  PASS  ATX 标题
+  PASS  ATX 标题
+  PASS  段落
+  PASS  段落
+  PASS  粗体
+  PASS  粗体
+  PASS  斜体
+  PASS  斜体
+  PASS  删除线
+  PASS  删除线
+  PASS  行内代码
+  PASS  行内代码
+  PASS  引用
+  PASS  引用
+  PASS  分隔线
+  PASS  分隔线
+  PASS  无序列表
+  PASS  无序列表
+  PASS  有序列表
+  PASS  有序列表
+  PASS  任务列表
+  PASS  任务列表
+  PASS  代码块语言
+  PASS  代码块语言
+  PASS  表格
+  PASS  表格
+  PASS  自动链接
+  PASS  自动链接
+  PASS  HTML 实体
+  PASS  HTML 实体
+  PASS  表格被包裹为可横向滚动容器
+  PASS  表格计数正确
+  PASS  图片不使用懒加载（避免遮挡时不加载）
+  PASS  图片带 async 解码提示
+  PASS  相对路径图片保留原样（由路由层解析）
+  PASS  网络图片地址被保留
+  PASS  data:image 图片被保留
+  PASS  两张图片均未拦截
+  PASS  文档中的 file: 绝对路径被拒绝
+  PASS  file: 绝对路径计入拦截统计
+  PASS  <script> 标签被移除
+  PASS  <script> 内容未作为文本漏出
+  PASS  安全的内联 HTML 标签被保留
+  PASS  事件属性被移除
+  PASS  div + align 保留
+  PASS  图片尺寸属性保留
+  PASS  details 保留
+  PASS  summary 保留
+  PASS  HTML 不再被转义为文本
+  PASS  原始 HTML 中的 javascript: 协议被移除
+  PASS  iframe 被移除
+  PASS  中文与 emoji 原样保留
+  PASS  韩文保留
+  PASS  长文档渲染成功
+        (长文档 148890 字节, 渲染耗时 1 ms)
+[安全策略]
+  PASS  javascript: 链接被拦截
+  PASS  data:text/html 链接被拦截
+  PASS  file: 链接被拦截
+  PASS  协议相对 URL 被拦截
+  PASS  被拦截链接替换为占位锚点
+  PASS  https 链接保留
+  PASS  mailto 链接保留
+  PASS  data:image 图片保留
+  PASS  拦截计数正确
+  PASS  vbscript 被拒绝
+  PASS  首尾空白的 javascript 被拒绝
+  PASS  含换行的 javascript 被拒绝
+  PASS  相对图片路径允许
+  PASS  页内锚点允许
+[资源路由]
+  PASS  GET /__doc 返回渲染结果
+  PASS  GET /__meta 返回 JSON
+  PASS  GET /__app/app.css 返回样式
+  PASS  GET /__app/shell.html 注入页面脚本
+  PASS  文档相对图片可读取
+  PASS  不存在的图片返回 404
+  PASS  上跳路径被拒绝
+  PASS  百分号编码的上跳路径被拒绝
+  PASS  绝对路径被拒绝
+  PASS  非图片扩展名被拒绝
+  PASS  未保存文档的相对资源被拒绝
+  PASS  文档版本号单调递增
+[快照导出]
+  PASS  相对图片改写为 file:/// 绝对路径
+  PASS  远程图片保持不变
+  PASS  越界相对路径替换为占位图
+
+共 83 项检查，失败 0 项。
+stage1 exit code: 0
+
+=== Stage 2: Notepad4 inline preview ===
+=== Notepad4 内嵌 Markdown 预览集成测试 ===
+        (res 目录: 不存在)
+  PASS  编辑器主窗口出现
+  PASS  找到 Scintilla 编辑控件
+        (client=1344)
+  PASS  主菜单中包含 Markdown 预览子菜单
+  PASS  打开 .md 自动进入预览视图
+  PASS  预览视图隐藏编辑器
+  PASS  预览视图下预览占满客户区
+  PASS  页面完成渲染并回报宿主
+  PASS  文档中的本地图片已加载并显示
+  PASS  关闭预览后编辑器重新出现
+  PASS  编辑器恢复占满客户区
+  PASS  取消勾选后打开 .md 为编辑视图
+  PASS  手动打开后预览面板与分隔条同时出现
+        (pane=672, splitter=6, editor=666)
+  PASS  预览面板有实际宽度
+  PASS  编辑器被压缩到左侧（原窗口内分栏）
+  PASS  三部分宽度之和等于客户区宽度
+  PASS  面板内出现 WebView2 渲染子窗口
+  PASS  输入未保存内容后布局保持不变
+  PASS  拖动分隔条改变预览面板宽度
+  PASS  双击分隔条恢复默认宽度
+  PASS  手动刷新后预览面板仍然可见
+  PASS  关闭后预览面板与分隔条隐藏
+  PASS  关闭后编辑器恢复占满客户区
+  PASS  预览可重复打开
+  PASS  全程编辑器进程未退出
+
+失败 0 项。
+stage2 exit code: 0
+
+[PASS] all test stages passed.
