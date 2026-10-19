@@ -41,7 +41,7 @@ Notepad4 内置 Markdown **语法高亮**，但没有渲染能力：写 README�
 
 | 问题 | 结论 |
 | --- | --- |
-| 是 DLL 插件吗？ | **不是**。Notepad4 没有插件 API（无 `NPPM_*`、无 `LoadLibrary` 扩展点），因此采用**最小主程序补丁**：11 个文件、`+4271 / −7` 行，其中 4 个是新增模块、1 个是生成的中文资源块 |
+| 是 DLL 插件吗？ | **不是**。Notepad4 没有插件 API（无 `NPPM_*`、无 `LoadLibrary` 扩展点），因此采用**最小主程序补丁**：11 个文件、`+4373 / −7` 行，其中 4 个是新增模块、1 个是生成的中文资源块 |
 | 能预览未保存内容吗？ | **能**。内容来自 `SCI_GETTEXT`，不读磁盘 |
 | 有自动刷新吗？ | **有**，默认开启，250 ms 防抖，可菜单关闭 |
 | 图片支持到什么程度？ | 本地相对路径 + 网络 + `data:`；仅允许读取**当前文档目录及子目录**内的图片 |
@@ -244,7 +244,7 @@ Notepad4Markdown/
 | 文件 | 行数 | 职责 |
 | --- | --- | --- |
 | `notepad4/src/MarkdownPreview.cpp` | 898 | 挂钩入口、分栏布局、分隔条、阅读视图、防抖定时器、渲染线程、菜单勾选、ini 读写 |
-| `notepad4/src/MarkdownPreviewView.cpp` | 936 | 容器窗口、WebView2 初始化与重建、`WebResourceRequested` 路由、导航拦截、诊断日志 |
+| `notepad4/src/MarkdownPreviewView.cpp` | 1038 | 容器窗口、WebView2 初始化与重建、`WebResourceRequested` 路由、导航拦截、诊断日志 |
 | `preview/src/MarkdownRenderer.cpp` | 977 | md4c 回调、GFM 标志、HTML 白名单重建、URL 白名单、快照 `file:///` 改写 |
 | `preview/src/LocalContent.cpp` | 579 | `/__doc` `/__meta` 路由、图片读取与越界校验、内嵌资源（`FindResourceW`）、HTML 快照导出 |
 | `shared/text_encoding.cpp` | 56 | `WideToUtf8` / `Utf8ToWide` / `ToUtf8` |
@@ -253,7 +253,7 @@ Notepad4Markdown/
 
 ### 3.3 对上游的改动
 
-`patch/0001-notepad4-markdown-preview.patch`（11 个文件，`+4271 / −7`）：
+`patch/0001-notepad4-markdown-preview.patch`（11 个文件，`+4373 / −7`）：
 
 | 文件 | 改动 |
 | --- | --- |

@@ -3248,10 +3248,10 @@ index 0000000..217a0f6
 +#endif
 diff --git a/src/MarkdownPreviewView.cpp b/src/MarkdownPreviewView.cpp
 new file mode 100644
-index 0000000..7cce37e
+index 0000000..b550489
 --- /dev/null
 +++ b/src/MarkdownPreviewView.cpp
-@@ -0,0 +1,936 @@
+@@ -0,0 +1,1038 @@
 +/******************************************************************************
 +*
 +* Notepad4
@@ -3529,6 +3529,99 @@ index 0000000..7cce37e
 +	std::wstring error;
 +	std::wstring status = L"正在启动预览引擎…";
 +
++	// 面板自绘文字用的字体。窗口 DC 的默认字是 SYSTEM_FONT（位图字体，
++	// 只有系统 ANSI 字符集），在部分系统上中文会显示成方框，因此显式选用
++	// 系统消息字体（中文系统为「微软雅黑 UI」），并按 DPI 缩放。
++	HFONT uiFont = nullptr;
++	bool uiFontOwned = false;
++	UINT uiFontDpi = 0;
++
++	// 该字体能否画出指定字符（字体链接也会被算作可绘制）。
++	static bool FaceCanRender(HDC dc, HFONT font, wchar_t ch) noexcept {
++		if (dc == nullptr || font == nullptr) {
++			return false;
++		}
++		HGDIOBJ old = ::SelectObject(dc, font);
++		WORD index = 0;
++		const wchar_t text[1] = { ch };
++		const DWORD result = ::GetGlyphIndicesW(dc, text, 1, &index, GGI_MARK_NONEXISTING_GLYPHS);
++		::SelectObject(dc, old);
++		return result != GDI_ERROR && index != 0xFFFF;
++	}
++
++	HFONT CreateUiFont(const LOGFONTW& base, UINT dpi) noexcept {
++		LOGFONTW lf = base;
++		if (lf.lfHeight != 0) {
++			lf.lfHeight = ::MulDiv(lf.lfHeight, static_cast<int>(dpi), 96);
++		}
++		HFONT font = ::CreateFontIndirectW(&lf);
++		if (font == nullptr) {
++			return nullptr;
++		}
++		HDC dc = ::GetDC(hwnd);
++		const bool usable = FaceCanRender(dc, font, L'正');
++		if (dc != nullptr) {
++			::ReleaseDC(hwnd, dc);
++		}
++		if (!usable) {
++			::DeleteObject(font);
++			return nullptr;
++		}
++		return font;
++	}
++
++	HFONT EnsureUiFont() noexcept {
++		const UINT dpi = WindowDpi();
++		if (uiFont != nullptr && uiFontDpi == dpi) {
++			return uiFont;
++		}
++		ReleaseUiFont();
++
++		// 首选系统消息字体（中文系统为「微软雅黑 UI」，英文系统为 Segoe UI）。
++		NONCLIENTMETRICSW metrics = {};
++		metrics.cbSize = sizeof(metrics);
++		if (::SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0)) {
++			uiFont = CreateUiFont(metrics.lfMessageFont, dpi);
++		}
++
++		// 若该字体画不出中文（部分机器关闭了字体链接），按常见中文字体逐个回退。
++		if (uiFont == nullptr) {
++			static const wchar_t* const kFallbackFaces[] = {
++				L"Microsoft YaHei UI", L"Microsoft YaHei", L"SimSun", L"Segoe UI",
++			};
++			for (const wchar_t* face : kFallbackFaces) {
++				LOGFONTW lf = {};
++				lf.lfHeight = -::MulDiv(9, static_cast<int>(dpi), 96);
++				lf.lfWeight = FW_NORMAL;
++				lf.lfCharSet = DEFAULT_CHARSET;
++				lf.lfQuality = CLEARTYPE_QUALITY;
++				wcscpy_s(lf.lfFaceName, face);
++				uiFont = CreateUiFont(lf, dpi);
++				if (uiFont != nullptr) {
++					break;
++				}
++			}
++		}
++
++		if (uiFont == nullptr) {
++			uiFont = static_cast<HFONT>(::GetStockObject(DEFAULT_GUI_FONT));
++			uiFontOwned = false;
++		} else {
++			uiFontOwned = true;
++		}
++		uiFontDpi = dpi;
++		return uiFont;
++	}
++
++	void ReleaseUiFont() noexcept {
++		if (uiFont != nullptr && uiFontOwned) {
++			::DeleteObject(uiFont);
++		}
++		uiFont = nullptr;
++		uiFontOwned = false;
++		uiFontDpi = 0;
++	}
++
 +
 +	// 兼容模式重建：延迟到消息循环执行，避免在 WebView2 事件回调里
 +	// 同步 Close/创建控制器（会返回 ERROR_INVALID_STATE）。
@@ -3688,8 +3781,14 @@ index 0000000..7cce37e
 +				RECT textRect = rect;
 +				textRect.left += ScaleForDpi(16, WindowDpi());
 +				textRect.right -= ScaleForDpi(16, WindowDpi());
++
++				HFONT font = impl->EnsureUiFont();
++				HGDIOBJ oldFont = font != nullptr ? ::SelectObject(dc, font) : nullptr;
 +				::DrawTextW(dc, impl->status.c_str(), -1, &textRect,
 +					DT_LEFT | DT_TOP | DT_WORDBREAK | DT_EDITCONTROL);
++				if (oldFont != nullptr) {
++					::SelectObject(dc, oldFont);
++				}
 +			}
 +		}
 +		::EndPaint(hwnd, &ps);
@@ -3733,6 +3832,9 @@ index 0000000..7cce37e
 +		break;
 +
 +	case WM_NCDESTROY:
++		if (impl != nullptr) {
++			impl->ReleaseUiFont();
++		}
 +		::SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
 +		break;
 +
