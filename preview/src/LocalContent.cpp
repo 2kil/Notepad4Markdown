@@ -9,6 +9,8 @@
 #include <cstdio>
 
 #include <algorithm>
+#include <exception>
+#include <new>
 #include <filesystem>
 #include <fstream>
 #include <vector>
@@ -51,6 +53,70 @@ bool ReadWholeFile(const std::wstring& path, std::string& out) {
 			out.clear();
 			return false;
 		}
+	}
+	return true;
+}
+
+// 打开文件后取最终规范路径再判断是否仍在文档目录内。
+// 只做字符串比较时，".. "（Win32 会去掉尾随空格）或 junction 都能绕过。
+bool IsPathInside(const std::wstring& base, const std::wstring& candidate);
+
+bool ReadWholeFileWithin(const std::wstring& baseNormalized, const std::wstring& candidate,
+	std::string& out, DWORD& win32Error) {
+	win32Error = ERROR_SUCCESS;
+	HANDLE file = ::CreateFileW(candidate.c_str(), GENERIC_READ,
+		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (file == INVALID_HANDLE_VALUE) {
+		win32Error = ::GetLastError();
+		return false;
+	}
+
+	wchar_t finalPath[32768] = {};
+	const DWORD length = ::GetFinalPathNameByHandleW(file, finalPath, ARRAYSIZE(finalPath),
+		FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+	if (length == 0 || length >= ARRAYSIZE(finalPath)) {
+		::CloseHandle(file);
+		win32Error = ERROR_PATH_NOT_FOUND;
+		return false;
+	}
+
+	std::wstring resolved(finalPath, length);
+	// 去掉 "\\?\" 与 "\\?\UNC\" 前缀，便于与 GetFullPathNameW 的结果比较。
+	const std::wstring uncPrefix = L"\\\\?\\UNC\\";
+	const std::wstring dosPrefix = L"\\\\?\\";
+	if (resolved.rfind(uncPrefix, 0) == 0) {
+		resolved = L"\\\\" + resolved.substr(uncPrefix.size());
+	} else if (resolved.rfind(dosPrefix, 0) == 0) {
+		resolved = resolved.substr(dosPrefix.size());
+	}
+
+	if (!IsPathInside(baseNormalized, resolved)) {
+		::CloseHandle(file);
+		win32Error = ERROR_ACCESS_DENIED;
+		return false;
+	}
+
+	LARGE_INTEGER size = {};
+	if (!::GetFileSizeEx(file, &size)) {
+		::CloseHandle(file);
+		win32Error = ::GetLastError();
+		return false;
+	}
+	if (size.QuadPart <= 0 || static_cast<unsigned long long>(size.QuadPart) > kMaxAssetBytes) {
+		::CloseHandle(file);
+		win32Error = ERROR_FILE_TOO_LARGE;
+		return false;
+	}
+
+	out.resize(static_cast<size_t>(size.QuadPart));
+	DWORD read = 0;
+	const BOOL ok = ::ReadFile(file, out.data(), static_cast<DWORD>(out.size()), &read, nullptr);
+	::CloseHandle(file);
+	if (!ok || read != out.size()) {
+		out.clear();
+		win32Error = ERROR_READ_FAULT;
+		return false;
 	}
 	return true;
 }
@@ -307,7 +373,18 @@ RenderResult LocalContent::UpdateDocument(std::string markdownUtf8, DocMeta meta
 	RenderOptions options;
 	options.baseDir = meta.dir;
 
-	RenderResult result = RenderMarkdown(markdownUtf8, options);
+	RenderResult result;
+	try {
+		result = RenderMarkdown(markdownUtf8, options);
+	} catch (const std::bad_alloc&) {
+		// 32 MB 上限下仍可能因多份副本叠加而分配失败；
+		// 不能让异常越过工作线程边界（会直接终止进程）。
+		result.ok = false;
+		result.error = "内存不足，渲染已中止";
+	} catch (const std::exception&) {
+		result.ok = false;
+		result.error = "渲染过程中发生异常";
+	}
 	if (!result.ok && result.error.empty()) {
 		result.error = "未知渲染错误";
 	}
@@ -458,7 +535,15 @@ HttpResponse LocalContent::Serve(std::wstring_view pathAndQuery) const {
 				end = relative.size();
 			}
 			const std::wstring segment = relative.substr(start, end - start);
-			if (segment == L"..") {
+			// Win32 会去掉路径段末尾的空格与点，因此 ".. " 等价于 ".."；
+			// 这类变体必须在字符串层面就拒绝。
+			std::wstring trimmed = segment;
+			while (!trimmed.empty() && (trimmed.back() == L' ' || trimmed.back() == L'\t'
+				|| trimmed.back() == L'.')) {
+				trimmed.pop_back();
+			}
+			if (trimmed == L".." || trimmed == L"."
+				|| (!segment.empty() && (segment.back() == L' ' || segment.back() == L'\t'))) {
 				response.status = 403;
 				response.body = "拒绝访问";
 				return response;
@@ -492,9 +577,11 @@ HttpResponse LocalContent::Serve(std::wstring_view pathAndQuery) const {
 	}
 
 	std::string body;
-	if (!ReadWholeFile(full, body)) {
-		response.status = 404;
-		response.body = "文件不存在或无法读取";
+	DWORD readError = ERROR_SUCCESS;
+	if (!ReadWholeFileWithin(baseNormalized, full, body, readError)) {
+		// 句柄级校验失败（越界/链接/超大）与单纯不存在要区分开。
+		response.status = (readError == ERROR_ACCESS_DENIED || readError == ERROR_FILE_TOO_LARGE) ? 403 : 404;
+		response.body = (response.status == 403) ? "拒绝访问" : "文件不存在或无法读取";
 		return response;
 	}
 	response.status = 200;
@@ -505,23 +592,17 @@ HttpResponse LocalContent::Serve(std::wstring_view pathAndQuery) const {
 
 bool LocalContent::ExportSnapshot(const std::wstring& outPath, std::string& error) const {
 	std::string shell;
-	{
-		std::lock_guard<std::mutex> lock(mutex_);
-		if (!LoadAsset(L"shell.html", shell)) {
-			error = "预览资源缺失";
-			return false;
-		}
+	if (!LoadAsset(L"shell.html", shell)) {
+		error = "预览资源缺失";
+		return false;
 	}
 
 	std::string css;
 	std::string js;
 	std::string highlight;
-	{
-		std::lock_guard<std::mutex> lock(mutex_);
-		LoadAsset(L"app.css", css);
-		LoadAsset(L"app.js", js);
-		LoadAsset(L"highlight.min.js", highlight);
-	}
+	LoadAsset(L"app.css", css);
+	LoadAsset(L"app.js", js);
+	LoadAsset(L"highlight.min.js", highlight);
 
 	std::string html;
 	std::string title;
@@ -546,6 +627,10 @@ bool LocalContent::ExportSnapshot(const std::wstring& outPath, std::string& erro
 		"<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; "
 		"style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
 		"img-src data: file: http: https:; base-uri 'none'; form-action 'none'\">";
+
+	if (theme != "light" && theme != "dark") {
+		theme = "auto";
+	}
 
 	std::string inlineScript = "<script>";
 	inlineScript += highlight;

@@ -16,6 +16,7 @@
 	--mark-bg: #fff8c5;
 	--danger: #cf222e;
 	--table-stripe: #f6f8fa;
+	--anchor-flash: #fff3c4;
 	--shadow: 0 1px 3px rgba(31, 35, 40, 0.06);
 }
 
@@ -52,6 +53,7 @@ html[data-theme="light"] {
 	--mark-bg: #fff8c5;
 	--danger: #cf222e;
 	--table-stripe: #f6f8fa;
+	--anchor-flash: #fff3c4;
 }
 
 html[data-theme="dark"] {
@@ -67,6 +69,7 @@ html[data-theme="dark"] {
 	--quote-bar: #3d444d;
 	--mark-bg: #4b3f00;
 	--danger: #f85149;
+	--anchor-flash: #3d3418;
 	--table-stripe: #151b23;
 }
 
@@ -116,6 +119,21 @@ body {
 	font-weight: 600;
 	line-height: 1.3;
 	scroll-margin-top: 12px;
+}
+
+/* 目录跳转后在目标标题上留一个短暂高亮，让用户确认落在哪里。 */
+@keyframes anchor-flash {
+	from { background-color: var(--anchor-flash); }
+	to { background-color: transparent; }
+}
+
+.markdown-body h1.anchor-flash,
+.markdown-body h2.anchor-flash,
+.markdown-body h3.anchor-flash,
+.markdown-body h4.anchor-flash,
+.markdown-body h5.anchor-flash,
+.markdown-body h6.anchor-flash {
+	animation: anchor-flash 1.2s ease-out;
 }
 
 .markdown-body h1 {

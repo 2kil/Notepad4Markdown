@@ -115,7 +115,7 @@
 		stats.total = images.length;
 		for (var i = 0; i < images.length; i++) {
 			var img = images[i];
-			if (!img.getAttribute("src")) {
+			if (!img.getAttribute("src") || img.getAttribute("data-blocked")) {
 				continue;   // 被安全策略替换掉的图片不计入
 			}
 			if (img.complete) {
@@ -148,6 +148,87 @@
 		notifyHost(html);
 	}
 
+	// 页内锚点：目录里的 [文字](#标题) 要跳到对应标题。
+	// 自己处理点击而不是依赖浏览器默认行为——内容是通过 innerHTML 注入的，
+	// 并且需要在找不到 id 时按文本再兜底匹配一次。
+	function decodeHash(hash) {
+		if (!hash) { return ""; }
+		try {
+			return decodeURIComponent(hash);
+		} catch (e) {
+			return hash;
+		}
+	}
+
+	function findAnchorTarget(hash) {
+		var name = decodeHash(hash.replace(/^#/, ""));
+		if (!name) { return null; }
+
+		var direct = document.getElementById(name);
+		if (direct) { return direct; }
+		// 兼容大小写差异（作者手写目录时常见）
+		direct = document.getElementById(name.toLowerCase());
+		if (direct) { return direct; }
+
+		// 兜底：把标题文本按同样规则归一化后比较，避免作者手写锚点与
+		// GitHub 的 slug 规则有细微出入时点了没反应。
+		function normalize(text) {
+			return (text || "").toLowerCase()
+				.replace(/[\s\u00a0]+/g, "-")
+				.replace(/[!"#$%&'()*+,.\/:;<=>?@\[\\\]^`{|}~]/g, "")
+				.replace(/[\u2000-\u206f\u2e00-\u2e7f\u3000-\u303f\ufe30-\ufe6f\uff01-\uff65]/g, "")
+				.replace(/-+/g, "-")
+				.replace(/^-|-$/g, "");
+		}
+		var wanted = normalize(name);
+		if (!wanted) { return null; }
+		var headings = contentEl ? contentEl.querySelectorAll("h1,h2,h3,h4,h5,h6") : [];
+		for (var i = 0; i < headings.length; i++) {
+			if (normalize(headings[i].textContent) === wanted) {
+				return headings[i];
+			}
+		}
+		return null;
+	}
+
+	function scrollToAnchor(hash, updateLocation) {
+		var target = findAnchorTarget(hash);
+		if (!target) { return false; }
+		target.scrollIntoView({ block: "start" });
+		// 给目标一点视觉反馈，避免"点完看不出跳到了哪里"。
+		target.classList.remove("anchor-flash");
+		void target.offsetWidth;
+		target.classList.add("anchor-flash");
+		if (updateLocation) {
+			try {
+				history.replaceState(null, "", hash);
+			} catch (e) {
+				/* 快照在 file:// 下可能禁止改历史，忽略即可 */
+			}
+		}
+		return true;
+	}
+
+	if (contentEl) {
+		contentEl.addEventListener("click", function (event) {
+			var node = event.target;
+			while (node && node !== contentEl && node.tagName !== "A") {
+				node = node.parentNode;
+			}
+			if (!node || node === contentEl || node.tagName !== "A") { return; }
+			var href = node.getAttribute("href") || "";
+			if (href.charAt(0) !== "#" || href === "#" || href === "#md-blocked-link") {
+				return;
+			}
+			event.preventDefault();
+			scrollToAnchor(href, true);
+		});
+	}
+
+	window.addEventListener("hashchange", function () {
+		scrollToAnchor(window.location.hash, false);
+	});
+
 	// 渲染完成后通知宿主：只传长度、版本与图片统计，不传正文。
 	function notifyHost(html) {
 		try {
@@ -178,6 +259,10 @@
 
 	async function reload(version) {
 		if (typeof version === "number" && version === currentVersion) {
+			return;
+		}
+		// 迟到的旧版本请求直接丢弃（C++ 侧也可能因重启而回退版本号）。
+		if (typeof version === "number" && version < currentVersion) {
 			return;
 		}
 		if (rendering) {
@@ -222,5 +307,10 @@
 		loadTheme();
 	}
 
-	document.addEventListener("DOMContentLoaded", function () { reload(0); });
+	if (document.readyState === "loading") {
+		document.addEventListener("DOMContentLoaded", function () { reload(0); });
+	} else {
+		// 脚本被延迟注入时 DOMContentLoaded 已经过去，直接拉取。
+		reload(0);
+	}
 })();

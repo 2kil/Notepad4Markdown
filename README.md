@@ -32,6 +32,7 @@ Notepad4 内置 Markdown **语法高亮**，但没有渲染能力：写 README�
 | 双主题 | 跟随编辑器明暗配色，也可用页面右下角 ◐ 按钮手动切换 |
 | GFM 渲染 | 标题、段落、引用、分隔线、有序/无序/任务列表、粗斜体、删除线、行内代码、代码块（本地 highlight.js 高亮）、表格、链接、图片、HTML 实体、自动链接 |
 | GitHub 风格 README | 保留原始 HTML 并按白名单重建，`<div align>`、徽章、`<details>`、emoji 正常显示 |
+| 目录跳转 | 标题自动生成 GitHub 同规则 `id`，`[文字](#锚点)` 点击即跳到对应章节，重复标题自动加 `-1`/`-2` |
 | 图片 | 本地相对路径（同目录 / 子目录 / `./`）、`http(s)` 远程图、`data:image/*` |
 | 中文友好 | 默认简体中文界面；UTF-8 / 系统代码页都能正确解码；中文字体回退 |
 | 一键带走 | 单个 `Notepad4.exe`，预览资源与中文界面全部内嵌，无 `res\`、无 `locale\`、无 CDN |
@@ -41,14 +42,14 @@ Notepad4 内置 Markdown **语法高亮**，但没有渲染能力：写 README�
 
 | 问题 | 结论 |
 | --- | --- |
-| 是 DLL 插件吗？ | **不是**。Notepad4 没有插件 API（无 `NPPM_*`、无 `LoadLibrary` 扩展点），因此采用**最小主程序补丁**：11 个文件、`+4373 / −7` 行，其中 4 个是新增模块、1 个是生成的中文资源块 |
+| 是 DLL 插件吗？ | **不是**。Notepad4 没有插件 API（无 `NPPM_*`、无 `LoadLibrary` 扩展点），因此采用**最小主程序补丁**：11 个文件、`+4490 / −7` 行，其中 4 个是新增模块、1 个是生成的中文资源块 |
 | 能预览未保存内容吗？ | **能**。内容来自 `SCI_GETTEXT`，不读磁盘 |
 | 有自动刷新吗？ | **有**，默认开启，250 ms 防抖，可菜单关闭 |
 | 图片支持到什么程度？ | 本地相对路径 + 网络 + `data:`；仅允许读取**当前文档目录及子目录**内的图片 |
 | 界面语言？ | **默认简体中文**（`UILanguage` 缺省 `2052`），可在「设置 → 语言」切换 |
 | 打开 `.md` 默认看到什么？ | 默认进入**阅读视图**（编辑器收起）；菜单「打开 Markdown 文件时显示预览」可关闭该行为 |
 | 怎么安装？ | 用构建产物替换 `Notepad4.exe` 即可，单文件 |
-| 验证到什么程度？ | 自动化 107 项（83 单测 + 24 真实编辑器集成）全部通过；未验证项见第 7 节 |
+| 验证到什么程度？ | 自动化 124 项（100 单测 + 24 真实编辑器集成）全部通过；未验证项见第 7 节 |
 
 ### 1.4 与上游的关系
 
@@ -169,6 +170,17 @@ SCN_MODIFIED ──▶ SetTimer(debounce) ──▶ 到期
 规范化后必须仍在文档目录内；`..`、`%2e%2e`、绝对路径、盘符一律 404；非图片扩展名一律 404；
 未保存文档没有目录，所有相对资源 404。
 
+越界校验是两层的：字符串层面拒绝 `..` 及其变体（含 Win32 会吞掉的尾随空格 / 点，如 `.. `），
+打开文件后再用 `GetFinalPathNameByHandleW` 取真实路径复核一次——这样 junction、符号链接也无法把
+读取带出文档目录。
+
+**HTML 清洗的边界处理**
+
+* `<script>` / `<style>` 等内容整段丢弃；**结束标签缺失时只丢弃该标签本身**，不会吞掉后面的正文。
+* `srcset` 按逗号拆分，逐个候选校验 URL（整串只看开头会被后续候选绕过）。
+* `loading="lazy"` 一律丢弃：面板被遮挡时 Chromium 会无限期推迟懒加载。
+* 标签边界扫描会跳过引号内的 `>`，`<div title="a>b">` 不会被截断。
+
 **导航与日志**
 
 * `AreDefaultContextMenusEnabled` / `AreDevToolsEnabled` / `AreBrowserAcceleratorKeysEnabled` 全部 `FALSE`。
@@ -222,7 +234,7 @@ Notepad4Markdown/
 │   ├── md4c/                      MIT，Markdown 解析（含 2 处 __cdecl 本地修改）
 │   └── webview2/                  SDK 头文件 + x64 静态导入库
 ├── tests/
-│   ├── mdtest.cpp                 83 项单元测试（渲染 / 安全 / 路由 / 快照）
+│   ├── mdtest.cpp                 100 项单元测试（渲染 / 安全 / 路由 / 快照）
 │   ├── mdtest.vcxproj             单测工程（CI 用 msbuild 编译）
 │   ├── integration_test.cpp       24 项真实编辑器集成测试
 │   └── fixtures/                  basic.md / images.md / unsafe.md / img/*.png
@@ -243,8 +255,8 @@ Notepad4Markdown/
 
 | 文件 | 行数 | 职责 |
 | --- | --- | --- |
-| `notepad4/src/MarkdownPreview.cpp` | 898 | 挂钩入口、分栏布局、分隔条、阅读视图、防抖定时器、渲染线程、菜单勾选、ini 读写 |
-| `notepad4/src/MarkdownPreviewView.cpp` | 1038 | 容器窗口、WebView2 初始化与重建、`WebResourceRequested` 路由、导航拦截、诊断日志 |
+| `notepad4/src/MarkdownPreview.cpp` | 982 | 挂钩入口、分栏布局、分隔条、阅读视图、防抖定时器、渲染线程、菜单勾选、ini 读写 |
+| `notepad4/src/MarkdownPreviewView.cpp` | 1071 | 容器窗口、WebView2 初始化与重建、`WebResourceRequested` 路由、导航拦截、诊断日志 |
 | `preview/src/MarkdownRenderer.cpp` | 977 | md4c 回调、GFM 标志、HTML 白名单重建、URL 白名单、快照 `file:///` 改写 |
 | `preview/src/LocalContent.cpp` | 579 | `/__doc` `/__meta` 路由、图片读取与越界校验、内嵌资源（`FindResourceW`）、HTML 快照导出 |
 | `shared/text_encoding.cpp` | 56 | `WideToUtf8` / `Utf8ToWide` / `ToUtf8` |
@@ -253,7 +265,7 @@ Notepad4Markdown/
 
 ### 3.3 对上游的改动
 
-`patch/0001-notepad4-markdown-preview.patch`（11 个文件，`+4373 / −7`）：
+`patch/0001-notepad4-markdown-preview.patch`（11 个文件，`+4490 / −7`）：
 
 | 文件 | 改动 |
 | --- | --- |
@@ -332,15 +344,15 @@ msbuild tests\mdtest.vcxproj /p:Configuration=Release /p:Platform=x64   :: 只�
 scripts\run_tests.cmd
 ```
 
-* **阶段 1（`mdtest.exe`，83 项）**：Markdown 渲染、GFM、HTML 白名单、URL 协议、资源路由（越界 / 编码绕过 / 非图片）、版本号单调性、快照导出、图片加载统计。
+* **阶段 1（`mdtest.exe`，100 项）**：Markdown 渲染、GFM、HTML 白名单、URL 协议、标题锚点、资源路由（越界 / 编码绕过 / 非图片）、版本号单调性、快照导出、图片加载统计。
 * **阶段 2（`integration_test.exe`，24 项）**：真实启动 `Notepad4.exe`，用 `WM_COMMAND` / `WM_CHAR` 操作，断言布局、阅读视图、分隔条拖动、图片真的加载、进程存活，并输出截图到 `build\logs\`。
 
 本机实测：
 
 ```
-Stage 1  unit tests            83 项，失败 0 项        exit 0
+Stage 1  unit tests            100 项，失败 0 项       exit 0
 Stage 2  editor integration    24 项，失败 0 项        exit 0
-合计                            107 项，失败 0 项
+合计                            124 项，失败 0 项
 ```
 
 排查单个文档：
@@ -368,7 +380,7 @@ powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version v1.0.0
 | --- | --- |
 | `python scripts/fetch_upstream.py` | 按 `upstream.lock` 复现补丁树 |
 | `msbuild notepad4\build\VisualStudio\Notepad4.sln /t:Notepad4` | `Release` / `x64`，与本地同一工程 |
-| `msbuild tests\mdtest.vcxproj` → 运行 | 83 项单测（无 GUI，可在无头 runner 跑） |
+| `msbuild tests\mdtest.vcxproj` → 运行 | 100 项单测（无 GUI，可在无头 runner 跑） |
 | `scripts/package.ps1` | 打出 zip + sha256 |
 | `actions/upload-artifact` | 每次构建都可在 Actions 页面下载 |
 | `gh release create/upload` | 仅 `v*` 标签触发，重复推送相同标签则覆盖附件 |
@@ -382,7 +394,7 @@ git push origin v1.0.0
 
 注意：
 
-* **CI 只跑单测**：集成测试需要真实桌面会话与 WebView2 窗口，无头 runner 上不可靠；全量 107 项请本地跑。
+* **CI 只跑单测**：集成测试需要真实桌面会话与 WebView2 窗口，无头 runner 上不可靠；全量 124 项请本地跑。
 * **升级上游**：改 `upstream.lock` 的 `commit`，重新生成补丁并本地跑通后再提交——两者必须同步，否则 CI 的 `git apply` 会失败。
 * 工作流监听 `main` / `master`，默认分支不同则改 `build.yml` 的 `branches`。
 

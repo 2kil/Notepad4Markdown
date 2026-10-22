@@ -21,6 +21,7 @@ struct RenderStats {
 	size_t links = 0;
 	size_t images = 0;
 	size_t tables = 0;
+	size_t headings = 0;   // 带 id 的标题数量（锚点可跳转的目标数）
 	size_t blockedUrls = 0;
 	uint64_t elapsedMs = 0;
 };

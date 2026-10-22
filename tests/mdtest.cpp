@@ -84,7 +84,7 @@ void TestRendering() {
 		const char* expected;
 	};
 	const Case cases[] = {
-		{ "ATX 标题", "# 一级\n## 二级\n", "<h1>一级</h1>" },
+		{ "ATX 标题", "# 一级\n## 二级\n", "<h1 id=\"一级\">一级</h1>" },
 		{ "段落", "普通段落文本\n", "<p>普通段落文本</p>" },
 		{ "粗体", "**粗体**\n", "<strong>粗体</strong>" },
 		{ "斜体", "*斜体*\n", "<em>斜体</em>" },
@@ -217,6 +217,52 @@ void TestSecurity() {
 	Check(!mdpreview::IsUrlAllowed("  javascript:alert(1)  ", mdpreview::UrlUse::Link, reason), "首尾空白的 javascript 被拒绝");
 	Check(!mdpreview::IsUrlAllowed("java\nscript:alert(1)", mdpreview::UrlUse::Link, reason), "含换行的 javascript 被拒绝");
 	Check(mdpreview::IsUrlAllowed("images/a.png", mdpreview::UrlUse::Image, reason), "相对图片路径允许");
+
+	// --- 回归：原始 HTML 的边界与绕过 ---
+	// 未闭合的 <script src=...> 曾把后面的全部正文吞掉。
+	const mdpreview::RenderResult unclosed = mdpreview::RenderMarkdown(
+		"<script src=\"x.js\">\n\n## 标题\n\n正文必须保留\n", options);
+	CheckContains(unclosed.html, "正文必须保留", "未闭合 script 不再吞掉后续正文");
+	CheckNotContains(unclosed.html, "<script", "未闭合 script 标签本身被移除");
+
+	// loading="lazy" 曾让被遮挡的面板长期不加载图片。
+	const mdpreview::RenderResult lazy = mdpreview::RenderMarkdown(
+		"<img src=\"a.png\" loading=\"lazy\">\n", options);
+	CheckNotContains(lazy.html, "loading=", "loading 属性被丢弃");
+
+	// srcset 曾整串只校验开头，后面的候选可以夹带 javascript:。
+	const mdpreview::RenderResult srcset = mdpreview::RenderMarkdown(
+		"<img src=\"a.png\" srcset=\"b.png 1x, javascript:alert(1) 2x\">\n", options);
+	CheckNotContains(srcset.html, "javascript:alert(1)", "srcset 中的危险候选被拒绝");
+	const mdpreview::RenderResult srcsetOk = mdpreview::RenderMarkdown(
+		"<img src=\"a.png\" srcset=\"b.png 1x, c.png 2x\">\n", options);
+	CheckContains(srcsetOk.html, "srcset=\"b.png 1x, c.png 2x\"", "正常的 srcset 保留");
+
+	// 目录跳转：标题必须带 GitHub 风格 id，否则 [文字](#锚点) 点了没反应。
+	const mdpreview::RenderResult toc = mdpreview::RenderMarkdown(
+		"- [0. 基础信息](#0-基础信息)\n- [2. 直播伴侣：开播下播](#2-直播伴侣开播下播)\n\n"
+		"---\n\n## 0. 基础信息\n\n## 2. 直播伴侣：开播下播\n", options);
+	CheckContains(toc.html, "<h2 id=\"0-基础信息\">", "中文标题生成锚点 id");
+	CheckContains(toc.html, "<h2 id=\"2-直播伴侣开播下播\">", "全角冒号在锚点中被丢弃");
+	Check(toc.stats.headings == 2, "标题计数正确");
+
+	// 重复标题与纯符号标题也要有唯一、非空的锚点。
+	const mdpreview::RenderResult dup = mdpreview::RenderMarkdown(
+		"## 说明\n\n## 说明\n\n## !!!\n", options);
+	CheckContains(dup.html, "id=\"说明\"", "首个同名标题保留原名");
+	CheckContains(dup.html, "id=\"说明-1\"", "同名标题追加序号");
+	CheckContains(dup.html, "id=\"section\"", "纯符号标题回退为 section");
+
+	// 标题里的行内标记不应出现在锚点里。
+	const mdpreview::RenderResult code = mdpreview::RenderMarkdown(
+		"## 用 `git apply` 打补丁\n", options);
+	CheckContains(code.html, "id=\"用-git-apply-打补丁\"", "锚点忽略行内代码的反引号");
+
+	// 属性值里的 '>' 曾让标签在中间被截断。
+	const mdpreview::RenderResult quote = mdpreview::RenderMarkdown(
+		"<div title=\"a>b\">inner</div>\n", options);
+	CheckContains(quote.html, "title=\"a>b\"", "属性值中的 > 不再截断标签");
+	CheckContains(quote.html, "inner", "标签后的内容保留");
 	Check(mdpreview::IsUrlAllowed("#anchor", mdpreview::UrlUse::Link, reason), "页内锚点允许");
 }
 
@@ -237,7 +283,8 @@ void TestAssetRouter(const std::wstring& appDir, const std::wstring& docDir) {
 	content.UpdateDocument("# hello\n\n![x](img/pic.png)\n", meta);
 
 	const mdpreview::HttpResponse doc = content.Serve(L"/__doc");
-	Check(doc.status == 200 && doc.body.find("<h1>hello</h1>") != std::string::npos, "GET /__doc 返回渲染结果");
+	Check(doc.status == 200 && doc.body.find("<h1 id=\"hello\">hello</h1>") != std::string::npos,
+		"GET /__doc 返回渲染结果");
 
 	const mdpreview::HttpResponse metaResponse = content.Serve(L"/__meta");
 	Check(metaResponse.status == 200 && metaResponse.body.find("\"title\"") != std::string::npos,
@@ -266,6 +313,14 @@ void TestAssetRouter(const std::wstring& appDir, const std::wstring& docDir) {
 
 	const mdpreview::HttpResponse escape3 = content.Serve(L"/C:/Windows/win.ini");
 	Check(escape3.status == 403 || escape3.status == 404, "绝对路径被拒绝");
+
+	// Win32 会去掉路径段末尾的空格与点，".. " 实际等价于 ".."。
+	const mdpreview::HttpResponse escape4 = content.Serve(L"/.. /secret.txt");
+	Check(escape4.status == 403 || escape4.status == 404, "尾随空格的 .. 被拒绝");
+	const mdpreview::HttpResponse escape5 = content.Serve(L"/..%20/secret.txt");
+	Check(escape5.status == 403 || escape5.status == 404, "编码后的尾随空格 .. 被拒绝");
+	const mdpreview::HttpResponse escape6 = content.Serve(L"/. ./secret.txt");
+	Check(escape6.status == 403 || escape6.status == 404, "点与空格变体被拒绝");
 
 	const mdpreview::HttpResponse nonImage = content.Serve(L"/secret.txt");
 	Check(nonImage.status == 403, "非图片扩展名被拒绝");

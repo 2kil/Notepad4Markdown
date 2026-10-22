@@ -2223,10 +2223,10 @@ index 96592db..8c42445 100644
  BEGIN
 diff --git a/src/MarkdownPreview.cpp b/src/MarkdownPreview.cpp
 new file mode 100644
-index 0000000..f54d81e
+index 0000000..5e6e5ac
 --- /dev/null
 +++ b/src/MarkdownPreview.cpp
-@@ -0,0 +1,898 @@
+@@ -0,0 +1,982 @@
 +/******************************************************************************
 +*
 +* Notepad4
@@ -2556,19 +2556,43 @@ index 0000000..f54d81e
 +	g_state.renderWake = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
 +	g_state.renderStop = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
 +	if (g_state.renderWake == nullptr || g_state.renderStop == nullptr) {
++		// 失败时立即回收，否则下次调用会覆盖句柄，永久泄漏。
++		if (g_state.renderWake != nullptr) {
++			::CloseHandle(g_state.renderWake);
++			g_state.renderWake = nullptr;
++		}
++		if (g_state.renderStop != nullptr) {
++			::CloseHandle(g_state.renderStop);
++			g_state.renderStop = nullptr;
++		}
 +		return false;
 +	}
 +
 +	g_state.renderThread = ::CreateThread(nullptr, 0, RenderThreadProc, nullptr, 0, nullptr);
-+	return g_state.renderThread != nullptr;
++	if (g_state.renderThread == nullptr) {
++		::CloseHandle(g_state.renderWake);
++		::CloseHandle(g_state.renderStop);
++		g_state.renderWake = nullptr;
++		g_state.renderStop = nullptr;
++		return false;
++	}
++	return true;
 +}
 +
-+void StopRenderThread() noexcept {
-+	if (g_state.renderStop != nullptr) {
-+		::SetEvent(g_state.renderStop);
++// 返回 true 表示线程已确认退出。超时返回 false：此时绝不能关闭事件句柄，
++// 更不能调用 DeleteCriticalSection——线程可能正在 EnterCriticalSection，
++// 删除后就是未定义行为。进程马上退出，泄漏两个句柄比崩溃安全。
++bool StopRenderThread() noexcept {
++	if (g_state.renderStop == nullptr) {
++		return true;
 +	}
++	::SetEvent(g_state.renderStop);
++
 +	if (g_state.renderThread != nullptr) {
-+		::WaitForSingleObject(g_state.renderThread, 5000);
++		const DWORD wait = ::WaitForSingleObject(g_state.renderThread, 5000);
++		if (wait != WAIT_OBJECT_0) {
++			return false;
++		}
 +		::CloseHandle(g_state.renderThread);
 +		g_state.renderThread = nullptr;
 +	}
@@ -2580,6 +2604,18 @@ index 0000000..f54d81e
 +		::CloseHandle(g_state.renderStop);
 +		g_state.renderStop = nullptr;
 +	}
++	return true;
++}
++
++// 取消排队中的渲染任务。job 由 renderLock 保护，必须在锁内修改。
++void CancelPendingRender() noexcept {
++	if (!g_state.renderLockReady) {
++		g_state.job.pending = false;
++		return;
++	}
++	::EnterCriticalSection(&g_state.renderLock);
++	g_state.job.pending = false;
++	::LeaveCriticalSection(&g_state.renderLock);
 +}
 +
 +// 抓取快照并交给工作线程。explicitRequest 为 true 时，体积超限会提示用户。
@@ -2674,6 +2710,12 @@ index 0000000..f54d81e
 +				IniSetInt(kIniSection, L"panelwidth", g_state.panelWidthDip);
 +			}
 +		}
++		return 0;
++
++	case WM_CAPTURECHANGED:
++		// 捕获被系统或其它窗口抢走（Alt+Tab、弹窗）时不会再有 LBUTTONUP；
++		// 不复位的话，之后鼠标掠过分隔条就会改变面板宽度。
++		g_state.dragging = false;
 +		return 0;
 +
 +	case WM_LBUTTONDBLCLK:
@@ -2861,7 +2903,7 @@ index 0000000..f54d81e
 +
 +	g_state.open = false;
 +	g_state.previewOnly = false;
-+	g_state.job.pending = false;
++	CancelPendingRender();
 +	SetEditorVisible(true);
 +	RelayoutMainWindow();
 +
@@ -2898,7 +2940,7 @@ index 0000000..f54d81e
 +	if (!g_state.autoRefresh && hwndMain != nullptr) {
 +		// 关闭后不再安排任何渲染任务，避免无谓的后台开销。
 +		::KillTimer(hwndMain, kDebounceTimerId);
-+		g_state.job.pending = false;
++		CancelPendingRender();
 +	}
 +	if (hwndMain != nullptr) {
 +		::DrawMenuBar(hwndMain);
@@ -2914,6 +2956,12 @@ index 0000000..f54d81e
 +	}
 +
 +	// 用户显式操作：同步渲染一次，保证导出的是最新内容。
++	// 先丢弃排队中的任务，否则工作线程随后会用更旧的快照覆盖刚导出的结果。
++	if (hwndMain != nullptr) {
++		::KillTimer(hwndMain, kDebounceTimerId);
++	}
++	CancelPendingRender();
++
 +	bool oversize = false;
 +	std::string markdown = CurrentTextAsUtf8(oversize);
 +	if (oversize) {
@@ -2923,6 +2971,9 @@ index 0000000..f54d81e
 +
 +	const int64_t version = ++g_state.version;
 +	g_state.content.UpdateDocument(std::move(markdown), BuildMeta(version));
++	// 工作线程可能还持有一份更旧的快照；把水位线抬到当前版本，
++	// 它完成时会因 version < renderedVersion 被丢弃，不会回灌旧内容。
++	g_state.renderedVersion = version;
 +
 +	std::wstring dir = LocalAppDataDirectory();
 +	dir += L"\\Notepad4MarkdownPreview\\snapshots";
@@ -2933,9 +2984,34 @@ index 0000000..f54d81e
 +		::GetCurrentProcessId(), static_cast<long long>(version));
 +	const std::wstring path = dir + name;
 +
++	// 快照会一直堆在 LocalAppData 里；顺手清掉 1 天前的旧文件。
++	{
++		WIN32_FIND_DATAW entry = {};
++		HANDLE find = ::FindFirstFileW((dir + L"\\preview-*.html").c_str(), &entry);
++		if (find != INVALID_HANDLE_VALUE) {
++			FILETIME now = {};
++			::GetSystemTimeAsFileTime(&now);
++			ULARGE_INTEGER nowValue = {};
++			nowValue.LowPart = now.dwLowDateTime;
++			nowValue.HighPart = now.dwHighDateTime;
++			do {
++				ULARGE_INTEGER written = {};
++				written.LowPart = entry.ftLastWriteTime.dwLowDateTime;
++				written.HighPart = entry.ftLastWriteTime.dwHighDateTime;
++				// FILETIME 单位为 100ns，24 小时 = 86400 * 10^7
++				if (nowValue.QuadPart > written.QuadPart
++					&& nowValue.QuadPart - written.QuadPart > 864000000000ULL) {
++					::DeleteFileW((dir + L"\\" + entry.cFileName).c_str());
++				}
++			} while (::FindNextFileW(find, &entry));
++			::FindClose(find);
++		}
++	}
++
 +	std::string error;
 +	if (!g_state.content.ExportSnapshot(path, error)) {
-+		const std::wstring message(error.begin(), error.end());
++		// error 是 UTF-8：逐字节转宽字符会让中文提示变成乱码。
++		const std::wstring message = mdpreview::Utf8ToWide(error);
 +		MsgBox(MB_OK | MB_ICONERROR, IDS_MDPREVIEW_EXPORT_FAILED, message.c_str());
 +		return;
 +	}
@@ -2976,6 +3052,12 @@ index 0000000..f54d81e
 +		if (!g_state.open) {
 +			g_state.previewOnly = true;
 +			MarkdownPreview_Open();       // 内部会抓取内容并渲染
++			if (!g_state.open) {
++				// 面板创建失败（WebView2 缺失等）：不要把状态留在"阅读视图"，
++				// 否则之后手动打开会直接隐藏编辑器。
++				g_state.previewOnly = false;
++				return;
++			}
 +		} else {
 +			SubmitRender(false);
 +		}
@@ -3075,7 +3157,9 @@ index 0000000..f54d81e
 +		panelWidth = std::max(0, cx - splitterW);
 +	}
 +
-+	::SetWindowPos(hwndEdit, nullptr, 0, top, editorWidth, cy, SWP_NOZORDER | SWP_NOACTIVATE);
++	if (hwndEdit != nullptr) {
++		::SetWindowPos(hwndEdit, nullptr, 0, top, editorWidth, cy, SWP_NOZORDER | SWP_NOACTIVATE);
++	}
 +	::SetWindowPos(g_state.splitter, nullptr, editorWidth, top, splitterW, cy, SWP_NOZORDER | SWP_NOACTIVATE);
 +	::SetWindowPos(g_state.paneHwnd, nullptr, editorWidth + splitterW, top,
 +		panelWidth, cy, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -3109,7 +3193,7 @@ index 0000000..f54d81e
 +		::KillTimer(hwndMain, kDebounceTimerId);
 +	}
 +
-+	StopRenderThread();
++	const bool renderThreadStopped = StopRenderThread();
 +
 +	if (g_state.splitter != nullptr) {
 +		::DestroyWindow(g_state.splitter);
@@ -3120,7 +3204,7 @@ index 0000000..f54d81e
 +	g_state.paneHwnd = nullptr;
 +	g_state.open = false;
 +
-+	if (g_state.renderLockReady) {
++	if (g_state.renderLockReady && renderThreadStopped) {
 +		::DeleteCriticalSection(&g_state.renderLock);
 +		g_state.renderLockReady = false;
 +	}
@@ -3248,10 +3332,10 @@ index 0000000..217a0f6
 +#endif
 diff --git a/src/MarkdownPreviewView.cpp b/src/MarkdownPreviewView.cpp
 new file mode 100644
-index 0000000..b550489
+index 0000000..35419e5
 --- /dev/null
 +++ b/src/MarkdownPreviewView.cpp
-@@ -0,0 +1,1038 @@
+@@ -0,0 +1,1071 @@
 +/******************************************************************************
 +*
 +* Notepad4
@@ -3282,6 +3366,7 @@ index 0000000..b550489
 +#include "WebView2.h"
 +
 +#include <algorithm>
++#include <atomic>
 +#include <cstdarg>
 +#include <cstdio>
 +#include <cstring>
@@ -3335,7 +3420,8 @@ index 0000000..b550489
 +}
 +
 +bool IsExternalUrl(const std::wstring& uri) {
-+	return uri.rfind(L"http://", 0) == 0 || uri.rfind(L"https://", 0) == 0;
++	return uri.rfind(L"http://", 0) == 0 || uri.rfind(L"https://", 0) == 0
++		|| uri.rfind(L"mailto:", 0) == 0;
 +}
 +
 +
@@ -3369,7 +3455,7 @@ index 0000000..b550489
 +	}
 +	SYSTEMTIME time = {};
 +	::GetLocalTime(&time);
-+	char utf8[1400] = {};
++	char utf8[4096] = {};
 +	char stamp[64] = {};
 +	::WideCharToMultiByte(CP_UTF8, 0, message, -1, utf8, sizeof(utf8), nullptr, nullptr);
 +	::sprintf_s(stamp, "[%02u:%02u:%02u.%03u] ", time.wHour, time.wMinute, time.wSecond, time.wMilliseconds);
@@ -3513,6 +3599,9 @@ index 0000000..b550489
 +	bool ready = false;
 +	bool failed = false;
 +	bool dark = false;
++	// 视图已销毁但初始化回调可能仍在消息队列里。回调最先检查这个标记，
++	// 避免访问已释放的 Impl（关闭程序那一瞬间崩溃的根因）。
++	std::atomic<bool> abandoned{false};
 +
 +	// 预览是纯静态文本，默认关闭 GPU 合成：
 +	//   * 在虚拟机、远程桌面、受限沙箱中 GPU/utility 进程常常反复退出；
@@ -3665,7 +3754,9 @@ index 0000000..b550489
 +		initializing = false;
 +		failed = false;
 +		processFailures = 0;
-+		status = L"正在以兼容模式重新初始化预览引擎…";
++		pendingReload = false;
++		pendingVersion = 0;
++		status = L"正在重新初始化预览引擎…";
 +
 +		if (owner != nullptr) {
 +			owner->StartInitialize();
@@ -3916,6 +4007,9 @@ index 0000000..b550489
 +	const HRESULT hr = ::CreateCoreWebView2EnvironmentWithOptions(nullptr, impl->userDataDir.c_str(), options.Get(),
 +		Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
 +			[hwnd, impl](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
++				if (impl->abandoned.load(std::memory_order_acquire)) {
++					return S_OK;
++				}
 +				if (FAILED(result) || env == nullptr) {
 +					impl->initializing = false;
 +					if (impl->initAttempts < 4 && result != HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)
@@ -3946,6 +4040,9 @@ index 0000000..b550489
 +				env->CreateCoreWebView2Controller(hwnd,
 +					Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
 +						[hwnd, impl](HRESULT controllerResult, ICoreWebView2Controller* controller) -> HRESULT {
++							if (impl->abandoned.load(std::memory_order_acquire)) {
++								return S_OK;
++							}
 +							if (FAILED(controllerResult) || controller == nullptr) {
 +								impl->initializing = false;
 +								WriteDiagnostic(L"controller failed hr=0x%08X, retry %d",
@@ -4196,6 +4293,11 @@ index 0000000..b550489
 +		}
 +	}
 +
++	if (impl_->navigationCompletedToken.value != 0) {
++		impl_->webview->remove_NavigationCompleted(impl_->navigationCompletedToken);
++		impl_->navigationCompletedToken.value = 0;
++	}
++
 +	if (impl_->controller) {
 +		impl_->controller->Close();
 +	}
@@ -4203,12 +4305,27 @@ index 0000000..b550489
 +	impl_->controller.Reset();
 +	impl_->env.Reset();
 +
++	// USERDATA 马上会被清零，WM_NCDESTROY 里拿不到 impl，字体必须在这里释放。
++	impl_->ReleaseUiFont();
++
 +	if (hwnd_ != nullptr && ::IsWindow(hwnd_)) {
 +		// 先断开 USERDATA，避免窗口销毁过程中再访问已释放的 Impl。
 +		::SetWindowLongPtrW(hwnd_, GWLP_USERDATA, 0);
 +		::DestroyWindow(hwnd_);
 +	}
 +	hwnd_ = nullptr;
++
++	// 初始化回调是异步投递的；如果此刻还没收敛（没 ready 也没 failed），
++	// delete 之后回调仍会执行，形成 use-after-free。这里把 Impl 标记为
++	// 已废弃并有意保留：回调看到标记直接返回，内存由进程退出回收。
++	const bool initInFlight = impl_->initializing || impl_->restartPending
++		|| (!impl_->ready && !impl_->failed);
++	impl_->abandoned.store(true, std::memory_order_release);
++	if (initInFlight) {
++		WriteDiagnostic(L"view destroyed while initializing; impl kept alive");
++		impl_ = nullptr;
++		return;
++	}
 +
 +	delete impl_;
 +	impl_ = nullptr;
